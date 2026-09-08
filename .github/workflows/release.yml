@@ -1,0 +1,52 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tag must match VERSION
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d ' \n' < VERSION)"
+          if [ "$TAG" != "$FILE" ]; then
+            echo "Tag $GITHUB_REF_NAME does not match VERSION ($FILE) — refusing to publish."
+            exit 1
+          fi
+
+      - name: Consistency gate
+        run: scripts/check-versions.sh
+
+      - name: Test suites
+        run: tests/run-all.sh
+
+      - name: Build the release archive
+        run: scripts/package-release.sh
+
+      - name: Install from the archive exactly as a user would
+        run: |
+          ./install.sh --all --from dist/grillscaffold-loop-pilot.tar.gz
+          ./install.sh --verify
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --notes "See CHANGELOG.md for what changed. Install:
+          
+              curl -fsSL https://raw.githubusercontent.com/$GITHUB_REPOSITORY/main/install.sh | bash
+
+          Downloads are checksum-verified against SHA256SUMS." \
+            dist/grillscaffold-loop-pilot.tar.gz \
+            dist/SHA256SUMS

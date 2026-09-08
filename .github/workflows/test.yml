@@ -1,0 +1,41 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show the shell we are testing against
+        # macOS ships bash 3.2 as /bin/bash — the oldest shell the runner must support.
+        run: |
+          bash --version | head -1
+          /bin/bash --version | head -1
+          python3 --version
+
+      - name: Consistency gate
+        run: scripts/check-versions.sh
+
+      - name: Test suites
+        env:
+          # force the stock 3.2 shell on macOS so a bash-4-ism cannot slip through
+          BASH_BIN: ${{ matrix.os == 'macos-latest' && '/bin/bash' || 'bash' }}
+        run: tests/run-all.sh
+
+      - name: Install from a freshly built archive, then verify
+        run: |
+          scripts/package-release.sh
+          ./install.sh --all --from dist/grillscaffold-loop-pilot.tar.gz
+          ./install.sh --verify
+          ~/.claude/skills/loop-pilot/scripts/doctor.sh || true   # no agent CLIs on CI runners
+          ./uninstall.sh --all --purge-state

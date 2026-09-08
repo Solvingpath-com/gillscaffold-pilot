@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# fake-agent — stands in for `claude`, `codex` and `kimi` in tests and CI. Never calls an API.
+#
+# It records exactly what the runner sent it:
+#   $FAKE_AGENT_LOG_DIR/<n>.argv   one argv element per line ($0 first)
+#   $FAKE_AGENT_LOG_DIR/<n>.stdin  the bytes received on stdin (empty if none)
+#   $FAKE_AGENT_LOG_DIR/<n>.env    LOOP_PILOT_* environment, cwd
+# and acts out the outcome scripted for the phase in $FAKE_AGENT_SCRIPT (key=value lines):
+#   P1=done                mark the row done, touch work, save a patch
+#   P2=qa-pending:<notes>  mark qa-pending with Notes
+#   P3=blocked:<notes>     mark blocked
+#   P4=silent              exit 0 without touching status.md
+#   P5=exit:7              exit 7 without touching status.md
+#   P6=ratelimit           print a rate-limit line and exit 1 (row untouched)
+#   P7=sleep:30            sleep (watchdog test) — killed by the loop
+#   P8=done-flaky          done, but only creates the gate marker on the 2nd attempt
+#   P9=done-clobber        done, but ALSO rewrites P1's row back to todo (clobber-repair test)
+#   AUDIT=audit            write audit-<date>.md
+#   version=<x.y.z>        what `--version` prints
+#   login=ok|fail          what `auth status` / `login status` returns
+# The phase ID is read from the prompt line "You are one phase (Pn) of ..." or "Audit the".
+set -u
+NAME="${FAKE_AGENT_NAME:-$(basename "$0")}"
+LOGD="${FAKE_AGENT_LOG_DIR:-/tmp/fake-agent}"; mkdir -p "$LOGD"
+SCRIPT="${FAKE_AGENT_SCRIPT:-/dev/null}"
+cfg() { grep -E "^$1=" "$SCRIPT" 2>/dev/null | head -1 | cut -d= -f2-; }
+
+# ── non-run subcommands ──────────────────────────────────────────────────────
+case "${1:-}" in
+  --version|-v) v="$(cfg version)"; echo "${v:-9.9.9} ($NAME fake)"; exit 0 ;;
+  auth|login)   # claude auth status / codex login status
+    if [ "${2:-}" = "status" ]; then [ "$(cfg login)" = "fail" ] && { echo "Not logged in"; exit 1; }; echo "Logged in (fake)"; exit 0; fi ;;
+esac
+
+n=$(( $(ls "$LOGD" 2>/dev/null | grep -c '\.argv$') + 1 ))
+{ printf '%s\n' "$NAME"; for a in "$@"; do printf '%s\n' "$a"; done; } > "$LOGD/$n.argv"
+{ env | grep '^LOOP_PILOT_' | sort; printf 'cwd=%s\n' "$PWD"; } > "$LOGD/$n.env"
+
+# prompt: stdin when we were told to read it (codex `-`, claude no positional), else last argv
+PROMPT=""; STDIN_USED=0
+want_stdin=0
+case "$NAME" in
+  codex)  for a in "$@"; do [ "$a" = "-" ] && want_stdin=1; done ;;
+  claude) want_stdin=1; prev=""; for a in "$@"; do case "$prev" in --permission-mode|--allowedTools|--disallowedTools|--add-dir|--model|--max-turns|--permission-prompts|--append-system-prompt) prev=""; continue;; esac; case "$a" in -*) prev="$a";; *) want_stdin=0;; esac; done ;;
+  kimi)   want_stdin=0 ;;
+  *)      want_stdin=1 ;;                       # unknown wrapper name: assume stdin transport
+esac
+if [ "$want_stdin" = 1 ] && [ ! -t 0 ]; then PROMPT="$(cat)"; STDIN_USED=1; printf '%s' "$PROMPT" > "$LOGD/$n.stdin"
+else : > "$LOGD/$n.stdin"; fi
+if [ -z "$PROMPT" ]; then PROMPT="${*: -1}"; STDIN_USED=0; fi   # argument transport (kimi) or empty stdin
+printf 'stdin_used=%s\n' "$STDIN_USED" >> "$LOGD/$n.env"
+
+# ── which phase are we? ─────────────────────────────────────────────────────
+PH="$(printf '%s\n' "$PROMPT" | grep -oE 'You are one phase \(P[0-9A-Za-z]+\)' | head -1 | grep -oE 'P[0-9A-Za-z]+')"
+if [ -z "$PH" ]; then printf '%s\n' "$PROMPT" | grep -q '^Audit the' && PH="AUDIT"; fi
+FEAT="${LOOP_PILOT_FEATURE:-}"
+FDIR="$PWD/docs/features/$FEAT"
+STATUS="$FDIR/status.md"
+if [ -n "${FAKE_AGENT_SLEEP:-}" ]; then sleep "$FAKE_AGENT_SLEEP"; fi
+
+set_state() {  # phase state [notes]
+  python3 - "$STATUS" "$1" "$2" "${3:-}" <<'PY'
+import re,sys
+p,ph,st,notes=sys.argv[1:5]
+s=open(p).read()
+s=re.sub(rf'^(\| *{re.escape(ph)} *\| *)[^|]*(\|)',rf'\g<1>{st} \g<2>',s,count=1,flags=re.M)
+if notes:
+    lines=s.split("\n")
+    for i,l in enumerate(lines):
+        if re.match(rf'^\| *{re.escape(ph)} *\|',l):
+            c=l.split("|"); c[-2]=" "+notes+" "; lines[i]="|".join(c); break
+    s="\n".join(lines)
+open(p,'w').write(s)
+PY
+}
+work() { mkdir -p "$PWD/work" "$PWD/.patches"; echo "$PH by $NAME attempt $n" >> "$PWD/work/$PH.txt"; echo "diff" > "$PWD/.patches/$PH-repo.patch"; }
+attempt_no() { grep -l "one phase ($PH)" "$LOGD"/*.stdin "$LOGD"/*.argv 2>/dev/null | wc -l | tr -d ' '; }
+
+B="$(cfg "$PH")"; B="${B:-done}"
+echo "fake $NAME: phase=${PH:-?} behaviour=$B attempt=$(attempt_no)"
+case "$B" in
+  done)           work; set_state "$PH" done "ok"; echo "phase complete" ;;
+  done-flaky)     work; set_state "$PH" done "ok"; [ "$(attempt_no)" -ge 2 ] && touch "$PWD/work/gate-ok-$PH" ;;
+  done-clobber)   work; set_state "$PH" done "ok"; set_state P1 todo "clobbered by $PH" ;;
+  qa-pending*)    work; set_state "$PH" qa-pending "${B#qa-pending:}" ;;
+  blocked*)       set_state "$PH" blocked "${B#blocked:}" ;;
+  silent)         echo "did some thinking, forgot status.md"; exit 0 ;;
+  exit:*)         exit "${B#exit:}" ;;
+  ratelimit)      echo "Error: usage limit reached — resets at 6pm"; exit 1 ;;
+  sleep:*)        sleep "${B#sleep:}"; exit 0 ;;
+  audit)          echo "# Audit (fake) $(date)" > "$FDIR/audit-$(date +%Y-%m-%d).md"; echo "audit written" ;;
+  *)              echo "unknown behaviour $B"; exit 1 ;;
+esac
+exit 0

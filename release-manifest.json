@@ -1,0 +1,7 @@
+{
+  "release": "8.2.0",
+  "grillscaffold": "3.5.0",
+  "loopPilot": "8.2.0",
+  "runnerTemplate": 5,
+  "repository": "OWNER/REPO"
+}
