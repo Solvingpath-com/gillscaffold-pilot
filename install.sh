@@ -2,7 +2,7 @@
 # grillscaffold + loop-pilot installer.
 #
 # Local:   ./install.sh [--all|--claude|--codex] [--dry-run] [--verify] [--from <dir|archive>]
-# Remote:  curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash
+# Remote:  curl -fsSL https://raw.githubusercontent.com/Solvingpath-com/gillscaffold-pilot/main/install.sh | bash
 #          curl -fsSL .../install.sh | bash -s -- --codex --version v8.2.0
 #
 # Targets (user scope, no sudo, ever):
@@ -14,7 +14,7 @@
 # it does not own, and works with spaces in $HOME.
 set -uo pipefail
 
-DEFAULT_REPO="OWNER/REPO"          # ← the single source of truth for the GitHub slug
+DEFAULT_REPO="Solvingpath-com/gillscaffold-pilot"          # ← the single source of truth for the GitHub slug
 GITHUB_REPO="${LOOP_PILOT_REPO:-$DEFAULT_REPO}"
 ASSET="grillscaffold-loop-pilot.tar.gz"
 

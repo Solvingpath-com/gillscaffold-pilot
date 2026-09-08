@@ -15,7 +15,7 @@ adapters: `AGENT=claude ./loop.sh` and `AGENT=codex ./loop.sh` do exactly the sa
 ## Quick start
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/REPO/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Solvingpath-com/gillscaffold-pilot/main/install.sh | bash
 ```
 
 That installs both skills for every agent it supports. Then:

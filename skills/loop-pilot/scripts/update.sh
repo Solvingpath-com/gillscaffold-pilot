@@ -9,7 +9,7 @@
 #
 # Env: LOOP_PILOT_REPO=owner/repo   override the source repository
 set -uo pipefail
-REPO="${LOOP_PILOT_REPO:-OWNER/REPO}"
+REPO="${LOOP_PILOT_REPO:-Solvingpath-com/gillscaffold-pilot}"
 SDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$SDIR/.." && pwd)"
 
