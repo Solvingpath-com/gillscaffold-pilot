@@ -79,6 +79,21 @@ echo "drift" >> "$SANDBOX/bad2/skills/grillscaffold/references/loop-template.md"
 "$BASH_BIN" "$INSTALL" --claude --from "$SANDBOX/bad2" > "$SANDBOX/i8.out" 2>&1; RC8=$?
 assert '[ $RC8 != 0 ] && grep -q "differ" "$SANDBOX/i8.out"' "$(cat "$SANDBOX/i8.out")"
 
+echo "-- 5b. a repository with no published release fails clearly, not cryptically"
+mk_sandbox
+# run a COPY with no sibling skills/ dir, so the installer takes the download path
+cp "$INSTALL" "$SANDBOX/install-standalone.sh"; cp "$REPO_ROOT/VERSION" "$SANDBOX/VERSION"
+( cd "$SANDBOX" && LOOP_PILOT_REPO="Solvingpath-com/definitely-not-a-real-repo-$$" "$BASH_BIN" ./install-standalone.sh --claude ) > "$SANDBOX/nr.out" 2>&1; RCN=$?
+t_begin "explains that no release exists and names the branch fallback"
+assert '[ $RCN != 0 ] && grep -q "no release asset" "$SANDBOX/nr.out" && grep -q "LOOP_PILOT_REF=main" "$SANDBOX/nr.out"' "$(cat "$SANDBOX/nr.out")"
+t_begin "does not leak download progress into the error (the \$SRC capture bug)"
+assert '! grep -q "no source tree found (looked in.*downloading" "$SANDBOX/nr.out"' "$(cat "$SANDBOX/nr.out")"
+t_begin "wrote nothing to the skills directories"; assert '[ ! -d "$HOME/.claude/skills/loop-pilot" ]'
+rm_sandbox
+mk_sandbox
+tar -xzf "$REPO_ROOT/dist/grillscaffold-loop-pilot.tar.gz" -C "$SANDBOX" 2>/dev/null || "$BASH_BIN" "$REPO_ROOT/scripts/package-release.sh" >/dev/null 2>&1
+"$BASH_BIN" "$INSTALL" --all --quiet --from "$REPO_ROOT/dist/grillscaffold-loop-pilot.tar.gz" >/dev/null 2>&1
+
 echo "-- 6. uninstall"
 t_begin "--dry-run removes nothing"; "$BASH_BIN" "$UNINSTALL" --all --dry-run > "$SANDBOX/u0.out" 2>&1; assert '[ -d "$HOME/.claude/skills/loop-pilot" ] && grep -q "would remove" "$SANDBOX/u0.out"'
 "$BASH_BIN" "$UNINSTALL" --all > "$SANDBOX/u1.out" 2>&1

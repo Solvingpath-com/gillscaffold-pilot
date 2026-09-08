@@ -43,6 +43,10 @@ Packaged for distribution, and the runner became genuinely agent-neutral.
   `> HUMAN-ONLY:` is the only hard brake.
 
 **Fixed**
+- The installer no longer swallowed its own progress output into the source path: download
+  messages went to stdout inside a `$(...)` capture, so a failed download produced a garbled
+  "no source tree found (looked in → downloading latest…)". Progress now goes to stderr, and a
+  repository with no published release gets a clear message naming the branch-install fallback.
 - Paths containing spaces, apostrophes or `$` render and execute correctly everywhere
   (renderer quoting, argv arrays, installer with a `$HOME` that has a space).
 - The runner no longer relies on bash 4 features; macOS stock bash 3.2 is a supported target

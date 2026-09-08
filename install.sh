@@ -72,12 +72,14 @@ esac
 TMPROOT=""; cleanup() { [ -n "$TMPROOT" ] && rm -rf "$TMPROOT"; }; trap cleanup EXIT
 
 fetch_release() {  # downloads + verifies the release archive, echoes the extracted dir
+  # NOTE: this function's ONLY stdout is the path. All progress goes to stderr, because the
+  # caller reads it with $(...) — anything else printed here would end up inside $SRC.
   command -v curl >/dev/null 2>&1 || die "curl is required to install from GitHub"
   command -v tar  >/dev/null 2>&1 || die "tar is required to install from GitHub"
   TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/gs-lp-install.XXXXXX")"
   local base url sums
   if [ -n "${LOOP_PILOT_REF:-}" ]; then
-    step "fetching branch $LOOP_PILOT_REF of $GITHUB_REPO (no checksum available for branch installs)"
+    step "fetching branch $LOOP_PILOT_REF of $GITHUB_REPO (no checksum available for branch installs)" >&2
     curl -fsSL "https://codeload.github.com/$GITHUB_REPO/tar.gz/refs/heads/$LOOP_PILOT_REF" -o "$TMPROOT/src.tar.gz" \
       || die "could not download branch $LOOP_PILOT_REF from $GITHUB_REPO"
     tar -xzf "$TMPROOT/src.tar.gz" -C "$TMPROOT" || die "archive did not extract"
@@ -86,8 +88,14 @@ fetch_release() {  # downloads + verifies the release archive, echoes the extrac
   if [ -n "$VERSION_TAG" ]; then base="https://github.com/$GITHUB_REPO/releases/download/$VERSION_TAG"
   else base="https://github.com/$GITHUB_REPO/releases/latest/download"; fi
   url="$base/$ASSET"; sums="$base/SHA256SUMS"
-  step "downloading ${VERSION_TAG:-latest} from $GITHUB_REPO"
-  curl -fsSL "$url" -o "$TMPROOT/$ASSET" || die "could not download $url"
+  step "downloading ${VERSION_TAG:-latest} from $GITHUB_REPO" >&2
+  if ! curl -fsSL "$url" -o "$TMPROOT/$ASSET"; then
+    printf 'ERROR: no release asset at %s\n' "$url" >&2
+    printf '\n%s has no published release%s yet.\n' "$GITHUB_REPO" "${VERSION_TAG:+ tagged $VERSION_TAG}" >&2
+    printf 'Either publish one (git tag v%s && git push --tags), or install straight from the\n' "$(cat VERSION 2>/dev/null || echo X.Y.Z)" >&2
+    printf 'branch instead:\n\n    curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | LOOP_PILOT_REF=main bash\n\n' "$GITHUB_REPO" >&2
+    exit 1
+  fi
   if curl -fsSL "$sums" -o "$TMPROOT/SHA256SUMS" 2>/dev/null; then
     local want have
     want="$(awk -v a="$ASSET" '$2 ~ a {print $1; exit}' "$TMPROOT/SHA256SUMS")"
@@ -95,9 +103,9 @@ fetch_release() {  # downloads + verifies the release archive, echoes the extrac
     [ -z "$have" ] && have="$(sha256sum "$TMPROOT/$ASSET" | awk '{print $1}')"
     [ -n "$want" ] || die "SHA256SUMS has no entry for $ASSET"
     [ "$want" = "$have" ] || die "checksum mismatch for $ASSET (expected $want, got $have) — refusing to install"
-    step "checksum verified"
+    step "checksum verified" >&2
   else
-    say "  ⚠ no SHA256SUMS published for this release — continuing without checksum verification"
+    say "  ⚠ no SHA256SUMS published for this release — continuing without checksum verification" >&2
   fi
   mkdir -p "$TMPROOT/x"; tar -xzf "$TMPROOT/$ASSET" -C "$TMPROOT/x" || die "archive did not extract"
   if [ -d "$TMPROOT/x/skills" ]; then printf '%s\n' "$TMPROOT/x"
